@@ -1,31 +1,20 @@
 const express = require("express");
 const app = express();
-const session = require("express-session");
 const bodyParser = require("body-parser");
-const mysql = require("mysql");
+const pg = require("pg");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 const smtpTransport = require("nodemailer-smtp-transport");
 const crypto = require("crypto");
-const bcrypt = require("bcrypt"); 
+const bcrypt = require("bcrypt");
 
-app.use(
-  session({
-    secret: "vedant&sumedh",
-    resave: true,
-    saveUninitialized: true,
-  })
-);
-
-const path = require("path");
-app.set("views", path.join(__dirname, "views"));
-app.set("view engine", "ejs");
-
-const db = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "myappdb",
+// PostgreSQL connection configuration
+const db = new pg.Pool({
+  user: "cdrvpeqs",
+  host: "rain.db.elephantsql.com",
+  database: "cdrvpeqs",
+  password: "5MyiH_pPZfuMumjbJKobriKWRXxR6dL-",
+  port: 5432,
 });
 
 db.connect((err) => {
@@ -33,9 +22,7 @@ db.connect((err) => {
     console.error("Database connection error:", err);
   } else {
     console.log("Connected to the database");
-    console.log(" ");
     console.log("<--------------------------->");
-    console.log(" ");
     console.log("Authentication System Activated");
   }
 });
@@ -49,7 +36,7 @@ app.post("/signup", async (req, res) => {
   // Hash the password before storing it
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  const sql = "INSERT INTO users (email, password, name) VALUES (?, ?, ?)";
+  const sql = "INSERT INTO users (email, password, name) VALUES ($1, $2, $3)";
   db.query(sql, [email, hashedPassword, name], (error, result) => {
     if (error) {
       console.error("Error while signing up:", error);
@@ -63,20 +50,18 @@ app.post("/signup", async (req, res) => {
 app.post("/signin", (req, res) => {
   const { email, password } = req.body;
 
-  const sql = "SELECT * FROM users WHERE email = ?";
+  const sql = "SELECT * FROM users WHERE email = $1";
   db.query(sql, [email], async (error, results) => {
     if (error) {
       console.error("Error while signing in:", error);
       res.json({ success: false });
     } else {
-      if (results.length === 1) {
-        const user = results[0];
+      if (results.rowCount === 1) {
+        const user = results.rows[0];
         const storedPassword = user.password;
         const success = await bcrypt.compare(password, storedPassword);
 
         if (success) {
-          // Store user data in session
-          req.session.user = user;
           res.json({ success: true });
         } else {
           res.json({ success: false });
@@ -86,12 +71,6 @@ app.post("/signin", (req, res) => {
       }
     }
   });
-});
-
-
-app.get("/dashboard", (req, res) => {
-  console.log("Session Data:", req.session);
-  res.render("dashboard", { user: req.session.user });
 });
 
 // Nodemailer configuration
@@ -112,7 +91,7 @@ function generateToken() {
 
 // Store the token in the database along with the user's email
 function storeResetToken(email, token) {
-  const updateTokenSql = "UPDATE users SET reset_token = ? WHERE email = ?";
+  const updateTokenSql = "UPDATE users SET reset_token = $1 WHERE email = $2";
   db.query(updateTokenSql, [token, email], (error, result) => {
     if (error) {
       console.error("Error storing reset token:", error);
@@ -144,61 +123,22 @@ app.post("/forgot-password", (req, res) => {
   });
 });
 
-// Add this to your existing Node.js server code
-
-// ... (existing code)
-
-// app.post("/reset-password", (req, res) => {
-//   const { email, password, token } = req.body;
-
-//   // Verify the token against the stored token in the database
-//   const verifyTokenSql =
-//     "SELECT * FROM users WHERE email = ? AND reset_token = ?";
-//   db.query(verifyTokenSql, [email, token], (error, results) => {
-//     if (error) {
-//       console.error("Error verifying reset token:", error);
-//       res.json({ success: false });
-//     } else {
-//       if (results.length === 1) {
-//         // Update the password and reset token in the database
-//         const updatePasswordSql =
-//           "UPDATE users SET password = ?, reset_token = NULL WHERE email = ?";
-//         db.query(
-//           updatePasswordSql,
-//           [password, email],
-//           (updateError, updateResult) => {
-//             if (updateError) {
-//               console.error("Error updating password:", updateError);
-//               res.json({ success: false });
-//             } else {
-//               res.json({ success: true });
-//             }
-//           }
-//         );
-//       } else {
-//         // Invalid token or email
-//         res.json({ success: false });
-//       }
-//     }
-//   });
-// });
-
 app.post("/reset-password", async (req, res) => {
   const { email, password, token } = req.body;
 
   // Verify the token against the stored token in the database
   const verifyTokenSql =
-    "SELECT * FROM users WHERE email = ? AND reset_token = ?";
+    "SELECT * FROM users WHERE email = $1 AND reset_token = $2";
   db.query(verifyTokenSql, [email, token], async (error, results) => {
     if (error) {
       console.error("Error verifying reset token:", error);
       res.json({ success: false });
     } else {
-      if (results.length === 1) {
+      if (results.rowCount === 1) {
         // Update the password and reset token in the database
         const hashedPassword = await bcrypt.hash(password, 10);
         const updatePasswordSql =
-          "UPDATE users SET password = ?, reset_token = NULL WHERE email = ?";
+          "UPDATE users SET password = $1, reset_token = NULL WHERE email = $2";
         db.query(
           updatePasswordSql,
           [hashedPassword, email],
@@ -222,6 +162,5 @@ app.post("/reset-password", async (req, res) => {
 const port = 3000;
 app.listen(port, () => {
   console.log("<--------------------------->");
-  console.log(" ");
   console.log(`Server is running on port ${port}`);
 });
